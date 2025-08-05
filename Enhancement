@@ -1,0 +1,138 @@
+Great. Let’s extend the Terraform structure to include:
+
+VPC Endpoint for DynamoDB – enabling private access to DynamoDB from within the VPC.
+
+IAM Role and Policy – giving controlled access to the DynamoDB table.
+
+🛠 Updated Terraform Structure Overview
+We’ll update or add the following:
+
+modules/
+├── vpc/
+│   └── main.tf               # Add VPC endpoint for DynamoDB
+├── dynamodb/
+│   └── iam.tf                # New file: IAM roles and policies
+
+✅ 1. Add VPC Endpoint for DynamoDB (Gateway Endpoint)
+🔧 Update modules/vpc/main.tf
+Append this at the bottom of the existing file:
+
+hcl
+Copy
+Edit
+resource "aws_vpc_endpoint" "dynamodb" {
+  vpc_id            = aws_vpc.this.id
+  service_name      = "com.amazonaws.${var.region}.dynamodb"
+  vpc_endpoint_type = "Gateway"
+
+  route_table_ids = [aws_route_table.public.id]
+
+  tags = merge(var.tags, { Name = "dynamodb-endpoint" })
+}
+🔁 Note: You can add private route tables too if you're using private subnets for Lambda, ECS, etc.
+
+🔧 Update modules/vpc/variables.tf
+Add:
+
+h
+Copy
+Edit
+variable "region" {
+  description = "AWS region for VPC endpoint"
+  type        = string
+}
+🔧 Update Root main.tf for VPC
+h
+Copy
+Edit
+module "vpc" {
+  source               = "./modules/vpc"
+  vpc_cidr_block       = var.vpc_cidr_block
+  public_subnet_cidrs  = var.public_subnet_cidrs
+  private_subnet_cidrs = var.private_subnet_cidrs
+  availability_zones   = var.availability_zones
+  region               = var.aws_region            # <--- Added
+  tags                 = var.tags
+}
+✅ 2. Add IAM Role and Policy for DynamoDB Access
+📁 New file: modules/dynamodb/iam.tf
+hcl
+Copy
+Edit
+resource "aws_iam_role" "dynamodb_access" {
+  name = "${var.table_name}-access-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect = "Allow",
+      Principal = {
+        Service = "ec2.amazonaws.com"  # or "lambda.amazonaws.com"
+      },
+      Action = "sts:AssumeRole"
+    }]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_policy" "dynamodb_policy" {
+  name        = "${var.table_name}-access-policy"
+  description = "Policy to access DynamoDB table ${var.table_name}"
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Scan",
+          "dynamodb:Query"
+        ],
+        Resource = aws_dynamodb_table.this.arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "attach" {
+  role       = aws_iam_role.dynamodb_access.name
+  policy_arn = aws_iam_policy.dynamodb_policy.arn
+}
+📤 Update modules/dynamodb/outputs.tf
+hcl
+Copy
+Edit
+output "dynamodb_role_arn" {
+  value = aws_iam_role.dynamodb_access.arn
+}
+📤 IAM Role Usage Examples
+You can attach this IAM role to:
+
+An EC2 instance profile
+
+A Lambda function execution role
+
+An ECS task role
+
+🧪 Final Test with Commands
+bash
+Copy
+Edit
+terraform init
+terraform validate
+terraform plan -var-file="terraform.tfvars"
+terraform apply -var-file="terraform.tfvars"
+✅ Recap
+With these additions, your infrastructure now supports:
+
+Feature	Included
+VPC with public/private subnets	✅
+DynamoDB with TTL and range keys	✅
+VPC Endpoint for DynamoDB	✅
+IAM Role & Policy for DynamoDB	✅
+
